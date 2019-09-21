@@ -1,5 +1,4 @@
 from typing import Optional, Dict, List, Any
-
 import allennlp
 import torch
 from allennlp.nn.util import get_text_field_mask
@@ -23,7 +22,7 @@ class FEVERTextClassificationModel(Model):
                  regularizer: Optional[RegularizerApplicator] = None,
                  ) -> None:
 
-        super().__init__(vocab,regularizer)
+        super().__init__(vocab, regularizer)
 
         # Model components
         self._embedder = text_field_embedder
@@ -36,12 +35,12 @@ class FEVERTextClassificationModel(Model):
         # Initialize weights
         initializer(self)
 
-
     def forward(self,
                 claim: Dict[str, torch.LongTensor],
                 evidence: Dict[str, torch.LongTensor],
                 label: torch.IntTensor = None,
-                metadata: List[Dict[str, Any]] = None) -> Dict[str, torch.Tensor]:
+                metadata: List[Dict[str, Any]] = None) -> Dict[str,
+                                                               torch.Tensor]:
         # pylint: disable=arguments-differ
         """
         Parameters
@@ -56,43 +55,55 @@ class FEVERTextClassificationModel(Model):
             From a ``LabelField``
         metadata : ``List[Dict[str, Any]]``, optional, (default = None)
             Metadata containing the original tokenization of the claim and
-            evidence sentences with 'claim_tokens' and 'premise_tokens' keys respectively.
+            evidence sentences with 'claim_tokens' and 'premise_tokens' keys
+            respectively.
         Returns
         -------
         An output dictionary consisting of:
 
         label_logits : torch.FloatTensor
-            A tensor of shape ``(batch_size, num_labels)`` representing unnormalised log
-            probabilities of the entailment label.
+            A tensor of shape ``(batch_size, num_labels)`` representing
+            unnormalised log probabilities of the entailment label.
         label_probs : torch.FloatTensor
-            A tensor of shape ``(batch_size, num_labels)`` representing probabilities of the
-            entailment label.
+            A tensor of shape ``(batch_size, num_labels)`` representing
+            probabilities of the entailment label.
         loss : torch.FloatTensor, optional
             A scalar loss to be optimised.
         """
 
+        embedded_claim = self._embedder.forward(claim)
+        embedded_evidence = self._embedder.forward(evidence)
 
-        # TODO - Delete this line when you start working on your solution
-        raise NotImplementedError("Compute label logits (for supported and refuted) for the given Claim and Evidence input")
+        claim_mask = get_text_field_mask(claim).float()
+        evidence_mask = get_text_field_mask(evidence).float()
+        claim_sentence_length = claim_mask.sum(dim=1)
+        evidence_sentence_length = evidence_mask.sum(dim=1)
 
-        # TODO - Uncomment the code below
+        embedded_claim = embedded_claim.sum(dim=1)
+        embedded_evidence = embedded_evidence.sum(dim=1)
 
-        #label_logits = # TODO compute label logits for input
-        #label_probs = F.softmax(label_logits, dim=-1)
+        embedded_claim = torch.div(
+            embedded_claim.t(), claim_sentence_length).t()
+        embedded_evidence = torch.div(
+            embedded_evidence.t(), evidence_sentence_length).t()
+        embedded_sum = torch.cat([embedded_claim, embedded_evidence], dim=1)
+        label_logits = self._feed_forward(embedded_sum)
+        label_probs = F.softmax(label_logits, dim=-1)
 
-        #output_dict = {"label_logits": label_logits,
-        #               "label_probs": label_probs}
+        output_dict = {"label_logits": label_logits,
+                       "label_probs": label_probs}
 
-        #if label is not None:
-        #    loss = self._loss(label_logits, label.long().view(-1))
-        #    self._accuracy(label_logits, label)
-        #    output_dict["loss"] = loss
+        if label is not None:
+            loss = self._loss(label_logits, label.long().view(-1))
+            self._accuracy(label_logits, label)
+            output_dict["loss"] = loss
 
-        #if metadata is not None:
-        #    output_dict["claim_tokens"] = [x["claim_tokens"] for x in metadata]
-        #    output_dict["evidence_tokens"] = [x["evidence_tokens"] for x in metadata]
+        if metadata is not None:
+            output_dict["claim_tokens"] = [x["claim_tokens"] for x in metadata]
+            output_dict["evidence_tokens"] = [
+                x["evidence_tokens"] for x in metadata]
 
-        #return output_dict
+        return output_dict
 
     def get_metrics(self, reset: bool = False) -> Dict[str, float]:
         return {
