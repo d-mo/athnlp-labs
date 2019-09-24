@@ -57,7 +57,12 @@ class RNNModel(nn.Module):
         :param hidden: previous hidden state of the RNN language model
         :return: output of the model
         """
-        pass
+        embeddings = self.encoder(input)
+        dropped_embeddings = self.drop(embeddings)
+        rnn_out, rnn_hidden = self.rnn(dropped_embeddings, hidden)
+        rnn_dropped = self.drop(rnn_out)
+        decoded = self.decoder(rnn_dropped.view(rnn_dropped.size(0)*rnn_dropped.size(1), rnn_dropped.size(2)))
+        return decoded.view(rnn_out.size(0), rnn_out.size(1), decoded.size(1)), rnn_hidden
 
     def init_hidden(self, bsz):
         """

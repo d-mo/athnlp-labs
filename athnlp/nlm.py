@@ -5,6 +5,9 @@ import time
 import torch
 
 from athnlp.readers.lm_corpus import Corpus
+from athnlp.models.rnn_language_model import RNNModel
+from torch.nn import CrossEntropyLoss, CosineSimilarity
+from torch.nn.utils import clip_grad_norm
 
 parser = argparse.ArgumentParser(description='RNN/LSTM Language Model')
 parser.add_argument('--data', type=str, default='data/lm',
@@ -121,7 +124,7 @@ def evaluate(model, criterion, eval_batch_size, corpus, data_source):
     return total_loss / (len(data_source) - 1)
 
 
-def train(model, criterion, corpus, train_data, lr, bptt, epoch):
+def train(model, criterion, corpus, train_data, lr, bptt, epoch, optimizer):
     """
     Trains the specified language model by minimising the provided criterion using as the training data. It trains the
     model for a given number of epoch with a fixed learning rate.
@@ -145,17 +148,20 @@ def train(model, criterion, corpus, train_data, lr, bptt, epoch):
         data, targets = get_batch(train_data, i, bptt)
         # Starting each batch, we detach the hidden state from how it was previously produced.
         # If we didn't, the model would try backpropagating all the way to start of the dataset.
-        model.zero_grad()
+        optimizer.zero_grad()
+        # model.zero_grad()
         hidden = repackage_hidden(hidden)
-        # TODO: run model forward pass obtaining '(output, hidden)'
-        output, hidden = None, None
-        # TODO: compute loss using the defined criterion obtaining 'loss'.
-        loss = None
-        # TODO: compute backpropagation calling the backward pass
+        output, hidden = model(data, hidden)
+        loss = criterion(output.view(-1, ntokens), targets)
+        loss.backward()
 
-        # TODO (optional): implement gradient clipping to prevent
+        # implement gradient clipping to prevent
         # the exploding gradient problem in RNNs / LSTMs
         # check the PyTorch function `clip_grad_norm`
+        clip_grad_norm(model.parameters(), args.clip)
+        optimizer.step()
+        #for p in model.parameters():
+        #    p.data.add_(-lr, p.grad.data)
 
         total_loss += loss.item()
 
@@ -199,9 +205,9 @@ def main(args):
         ###############################################################################
         # Build the model
         ###############################################################################
-        # TODO: model definition and loss definition
-        model = None
-        criterion = None
+        model = RNNModel(args.model_type, len(corpus.dictionary), args.emsize,
+                         args.nhid, args.nlayers, args.dropout).to(device)
+        criterion = CrossEntropyLoss()
 
         # Loop over epochs.
         lr = args.lr
@@ -211,7 +217,8 @@ def main(args):
         try:
             for epoch in range(1, args.epochs + 1):
                 epoch_start_time = time.time()
-                train(model, criterion, corpus, train_data, lr, args.bptt, epoch)
+                optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
+                train(model, criterion, corpus, train_data, lr, args.bptt, epoch, optimizer)
                 val_loss = evaluate(model, criterion, eval_batch_size, corpus, val_data)
                 print('-' * 89)
                 print('| end of epoch {:3d} | time: {:5.2f}s | valid loss {:5.2f} | '
@@ -258,6 +265,18 @@ def main(args):
         # Use the pretrained LM at inference time
         ###############################################################################
         # TODO: Sentence completion solution
+        for word in corpus.dictionary.word2idx:
+            sentence = "The %s was arrested by the detective" % word
+            encoded_sentence = []
+            for sw in sentence.split():
+                encoded_sentence.append(corpus.dictionary.word2idx[sw.lower()])
+            hidden = model.init_hidden(1)
+            hidden = repackage_hidden(hidden)
+            data, _ = get_batch(torch.Tensor(encoded_sentence), 0, args.bptt)
+            import ipdb;ipdb.set_trace()
+            ret, hidden = model(data, hidden)
+
+        #import ipdb;ipdb.set_trace()
 
 
 if __name__ == "__main__":
