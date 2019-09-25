@@ -5,6 +5,10 @@ from allennlp.data.vocabulary import Vocabulary
 from allennlp.models.model import Model
 from allennlp.nn import RegularizerApplicator
 from allennlp.nn.initializers import InitializerApplicator
+from allennlp.training.metrics import Average, BooleanAccuracy, CategoricalAccuracy, SquadEmAndF1
+from allennlp.nn.util import masked_softmax, sequence_cross_entropy_with_logits
+from allennlp.models.reading_comprehension.util import get_best_span
+
 from overrides import overrides
 from pytorch_transformers.modeling_bert import BertModel
 
@@ -60,10 +64,19 @@ class BertQuestionAnswering(Model):
             param.requires_grad = trainable
 
         # 1. Instantiate any additional parts of your network
-
+        self.drop = torch.nn.Dropout(dropout)
+        self.linear = torch.nn.Linear(hidden_size, 2)
+        
         # 2. DON'T FORGET TO INITIALIZE the additional parts of your network.
+        initializer(self.linear)
 
         # 3. Instantiate your metrics
+        self._span_start_accuracy = CategoricalAccuracy()
+        self._span_end_accuracy = CategoricalAccuracy()
+        self._span_accuracy = BooleanAccuracy()
+        self._squad_metrics = SquadEmAndF1()
+
+        self.loss = torch.nn.CrossEntropyLoss()
 
     def forward(self,  # type: ignore
                 metadata: Dict,
@@ -106,17 +119,43 @@ class BertQuestionAnswering(Model):
         input_mask = (input_ids != 0).long()
 
         # 1. Build model here
+        bert_output, _ = self.bert_model(input_ids, token_type_ids, attention_mask=input_mask)
+        linear_output = self.linear(bert_output)
+        linear_dropped = self.drop(linear_output)
+        start_logits, end_logits = linear_dropped.split(1, dim=-1)
+        start_logits, end_logits = start_logits.squeeze(-1), end_logits.squeeze(-1)
 
         # 2. Compute start_position and end_position and then get the best span
         # using allennlp.models.reading_comprehension.util.get_best_span()
-
-        output_dict = {}
+        masked_soft_start = masked_softmax(start_logits, mask=input_mask)
+        masked_soft_end = masked_softmax(end_logits, mask=input_mask)
+        best_span = get_best_span(masked_soft_start, masked_soft_end)
+        output_dict = {
+            "start_logits": start_logits,
+            "end_logits": end_logits,
+            "start_probs": masked_soft_start,
+            "end_probs": masked_soft_end,
+            "best_span": best_span
+        }
 
         # 4. Compute loss and accuracies. You should compute at least:
         # span_start accuracy, span_end accuracy and full span accuracy.
+        # import ipdb;ipdb.set_trace()
+        self._span_start_accuracy(start_logits, span_start.squeeze())
+        self._span_end_accuracy(end_logits, span_end.squeeze())
+        self._span_accuracy(best_span,  torch.stack([span_start.squeeze(), span_end.squeeze()]))
+        
 
         # UNCOMMENT THIS LINE
-        # output_dict["loss"] =
+        # import ipdb;ipdb.set_trace()
+        if span_start is not None:
+            ignored_index = start_logits.size(1)
+            span_start.clamp_(0, ignored_index)
+            span_end.clamp_(0, ignored_index)
+            start_loss = self.loss(start_logits, span_start.squeeze(-1))
+            end_loss = self.loss(end_logits, span_end.squeeze(-1))
+            combined_loss = (start_loss + end_loss) / 2
+            output_dict["loss"] = combined_loss
 
         # 5. Optionally you can compute the official squad metrics (exact match, f1).
         # Instantiate the metric object in __init__ using allennlp.training.metrics.SquadEmAndF1()
