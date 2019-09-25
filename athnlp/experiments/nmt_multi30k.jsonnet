@@ -18,14 +18,15 @@
       }
     }
   },
-  "train_data_path": "data/multi30k/val.lc.norm.tok.head-750",
-  "validation_data_path": "data/multi30k/val.lc.norm.tok.head-250",
+  "train_data_path": "data/multi30k/val.lc.norm.tok.head-5",
+  "validation_data_path": "data/multi30k/val.lc.norm.tok.head-5",
   "model": {
     "type": "nmt_seq2seq",
     "source_embedder": {
       "token_embedders": {
         "source_tokens": {
             "type": "embedding",
+            #"pretrained_file": "resources/glove.6B.50d.txt.gz",
             "embedding_dim": 50,
             "trainable": true,
             "vocab_namespace": "source_tokens"
@@ -33,9 +34,9 @@
       }
     },
     "target_namespace": "target_tokens",
-//    "attention" : {
-//      "type" : "dot_product"
-//    },
+    "attention" : {
+      "type" : "dot_product"
+    },
     "encoder": {
       "type": "lstm",
       "input_size": 50,
